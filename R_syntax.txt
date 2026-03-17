@@ -1,0 +1,126 @@
+
+library(tidyverse) 
+library(psych)
+library(ggplot2)
+
+# Import first file - general noun info including countability indices 
+
+nouns <- read.csv("/home/kent/R/nouns/output/nouns_main_dataset_R_stats.csv", na.strings=".")
+# Check the variable formats 
+str(nouns)
+colnames(nouns)
+
+# Isolate the desired variables 
+
+vars <- nouns[, c("conc_mean",
+                 "conc_sd",
+                 "lexfreq",
+                 "ct_proportion",
+                 "pl_sg_prop")]
+# using psych
+round(corr.test(vars, use="pairwise")$p, 4)
+
+corr.test(vars, use="pairwise") 
+
+
+# line plot - prob density plot for categorically assigned count noun index
+ggplot(nouns, aes(x = ct_proportion)) +
+  geom_density(
+    fill = "steelblue",
+    alpha = 0.6
+  ) +
+  scale_x_continuous(
+    breaks = seq(0, 1, 0.1),
+    limits = c(0, 1)
+  ) +
+  labs(
+    x = "Countability Index (general)",
+    y = "# Noun Lemmas x 1000",
+    title = "Probability Density for General Noun Countability Index" 
+  ) +
+  theme_minimal()
+
+
+# line plot - prob density plot for bare pl count noun index
+ggplot(nouns, aes(x = pl_sg_prop)) +
+  geom_density(
+    fill = "steelblue",
+    alpha = 0.6
+  ) +
+  scale_x_continuous(
+    breaks = seq(0, 1, 0.1),
+    limits = c(0, 1)
+  ) +
+  labs(
+    x = "Countability Index (bare nouns)",
+    y = "# Noun Lemmas x 1000",
+    title = "Probability Density for Bare Noun Countability Index" 
+  ) +
+  theme_minimal()
+
+
+# histogram box plot - categorically assigned 
+ggplot(nouns, aes(x = ct_proportion)) +
+  geom_histogram(
+    binwidth = 0.05,
+    fill = "steelblue",
+    color = "black"
+  ) +
+  scale_x_continuous(
+    breaks = seq(0, 1, 0.1),
+    limits = c(0, 1)
+  ) +
+  labs(
+    x = "Countability Index (general)",
+    y = "# Noun Lemmas",
+    title = "Distribution of General Noun Countability Index"
+  ) +
+  theme_minimal()
+
+
+# histogram box plot - bare plural index 
+ggplot(nouns, aes(x = pl_sg_prop)) +
+  geom_histogram(
+    binwidth = 0.05,
+    fill = "steelblue",
+    color = "black"
+  ) +
+  scale_x_continuous(
+    breaks = seq(0, 1, 0.1),
+    limits = c(0, 1)
+  ) +
+  labs(
+    x = "Countability Index (bare nouns)",
+    y = "# Noun Lemmas",
+    title = "Distribution of Bare Noun Countability Index"
+  ) +
+  theme_minimal()
+
+
+# Meaningless plot 
+ggplot(nouns, aes(x = ct_proportion, y = lexfreq)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(
+    x = "Countability",
+    y = "Countability Index (ct_proportion)",
+    title = "Lexical Frequency and Noun Countability"
+  ) +
+  theme_minimal() 
+
+
+
+# ------------ Compound  Nouns --------------------- 
+
+# Compound noun data analysis; import cpd noun file with indices and check formats 
+
+cpd <- read.csv("/home/kent/R/nouns/output/noun.cpd.final.output.dataset.csv", na.strings=".")
+str(cpd)
+
+var1 <- cpd[,c("conc_mean",
+               "conc_sd",
+               "lexfreq",
+               "pl_sg_prop",
+               "ct_proportion",
+               "cpd_freq_index")] 
+corr.test(var1, use="pairwise")

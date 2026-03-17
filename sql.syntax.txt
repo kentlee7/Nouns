@@ -1,0 +1,497 @@
+
+
+Basic strategy:
+
+Mass =
+ - sg null-delim
+ - pl null-delim
+ -
+
+Count =
+ - sg a/an = indef
+ - pl some = indef
+ - sg the  = def
+ - pl the  = def
+
+
+
+MariaDB syntax
+create database nounEnt;
+
+SELECT DATABASE();
+
+DROP table sentences;
+CREATE TABLE sentences (
+ cum_sent_id BIGINT PRIMARY KEY,
+ sent_id INT,
+ text_id VARCHAR(255),
+ genre VARCHAR(100),
+ year INT,
+ pgraph_num INT,
+ sent_num INT
+);
+
+
+-- Table for nouns
+drop table nouns;
+use nounEnt;
+CREATE TABLE nouns (
+token_id BIGINT PRIMARY KEY,
+token VARCHAR(200),
+lemma VARCHAR(200),
+number  VARCHAR(20),
+definiteness  VARCHAR(20),
+countability  VARCHAR(20)
+);
+
+
+-- Table for tokens
+drop table tokens;
+use nounEnt;
+CREATE TABLE tokens (
+  token_id BIGINT PRIMARY KEY,  -- ten-digit token ID
+  sent_id INT,
+  cum_sent_id BIGINT,
+  token_postn INT,  -- token position
+  token VARCHAR(200),
+  lemma VARCHAR(200),
+  pos VARCHAR(20)		-- part of speech tag
+);
+
+
+
+-- Table for concreteness ratings
+CREATE TABLE concreteness (
+  lemma VARCHAR(200) PRIMARY KEY,
+  bigram INT,
+  conc_mean FLOAT,
+  conc_sd FLOAT,
+  lexfreq FLOAT       -- or DOUBLE, DECIMAL, depending on your data
+);
+
+
+LOAD DATA LOCAL INFILE '/d/Seafile/sfdox/2025np/sentences.csv'
+INTO TABLE sentences
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\r\n'
+IGNORE 1 LINES;
+
+
+LOAD DATA LOCAL INFILE '/d/Seafile/sfdox/2025np/nouns.csv'
+INTO TABLE nouns
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\r\n'
+IGNORE 1 LINES;
+
+LOAD DATA LOCAL INFILE '/d/Seafile/sfdox/2025np/concreteness.csv'
+INTO TABLE concreteness
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+IGNORE 1 LINES;
+
+Select count(*) from concreteness;
+
+LOAD DATA LOCAL INFILE '/d/Seafile/sfdox/2025np/tokens.csv'
+INTO TABLE tokens
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\r\n'
+IGNORE 1 LINES;
+
+-- ------------
+-- ------------
+
+
+
+
+SELECT COUNT(DISTINCT lemma) AS unique_count
+FROM tokens;
+
+
+-- Check raw distribution of definiteness category
+-- saved as raw_count_NOUNS_BY_assigned_definiteness.csv
+
+SELECT definiteness,  COUNT(*) AS tokens
+FROM nouns
+GROUP BY definiteness
+ORDER BY tokens DESC;
+
+-- saved as raw_count_NOUNS_BY_countability.csv
+
+SELECT countability,  COUNT(*) AS tokens
+FROM nouns
+GROUP BY countability
+ORDER BY tokens DESC;
+
+-- saved as raw_count_NOUNS_BY_number.csv
+
+SELECT number,  COUNT(*) AS tokens
+FROM nouns
+GROUP BY number
+ORDER BY tokens DESC;
+
+
+
+
+-- Ratio of bare sg and pl
+
+SELECT
+    lemma,
+    SUM(CASE WHEN definiteness = 'barePl' THEN 1 ELSE 0 END) AS bare_pl_tokens,
+    SUM(CASE WHEN definiteness = 'bareSg' THEN 1 ELSE 0 END) AS bare_sg_tokens,
+    ROUND(
+        SUM(CASE WHEN definiteness = 'barePl' THEN 1 ELSE 0 END) * 1.0
+        /
+        NULLIF(SUM(CASE WHEN definiteness = 'bareSg' THEN 1 ELSE 0 END), 0),
+        4
+    ) AS pl_sg_ratio
+FROM nouns
+WHERE definiteness IN ('bareSg', 'barePl')
+GROUP BY lemma
+HAVING
+    SUM(CASE WHEN definiteness = 'barePl' THEN 1 ELSE 0 END) > 0
+    AND
+    SUM(CASE WHEN definiteness = 'bareSg' THEN 1 ELSE 0 END) > 0
+ORDER BY pl_sg_ratio DESC;
+
+
+-- Proportion of bare sg and pl  +
+-- saved as prop_definiteness_barePl_bareSg.csv
+
+SELECT
+    lemma,
+    COUNT(*) AS total_bare_tokens,
+    SUM(CASE WHEN definiteness = 'barePl' THEN 1 ELSE 0 END) AS bare_pl_tokens,
+    ROUND(
+        SUM(CASE WHEN definiteness = 'barePl' THEN 1 ELSE 0 END) * 1.0
+        / COUNT(*),
+        4
+    ) AS bare_pl_proportion
+FROM nouns
+WHERE definiteness IN ('barePl', 'bareSg')
+GROUP BY lemma
+HAVING COUNT(*) >= 5
+ORDER BY bare_pl_proportion DESC;
+
+
+
+-- Proportion of nouns classified by script as count / mass +
+-- saved as prop_massct_countability_ct_mass.csv
+
+SELECT
+    lemma,
+    COUNT(*) AS massct_tokens,
+    SUM(CASE WHEN countability = 'count' THEN 1 ELSE 0 END) AS ct_tokens,
+    ROUND(
+        SUM(CASE WHEN countability = 'count' THEN 1 ELSE 0 END) * 1.0
+        / COUNT(*),
+        4
+    ) AS ct_proportion
+FROM nouns
+WHERE countability IN ('count', 'mass')
+GROUP BY lemma
+HAVING COUNT(*) >= 5
+ORDER BY ct_proportion DESC;
+
+
+-- Flexibility index based on bare singular vs. bare plural
+-- flex_index = barePl / (barePl + bareSg)
+-- 1.0 = strongly count N; 0.5 = strongly flex N; 0.0 = strongly masss N
+-- saved as flex_bareNP_index.csv
+
+SELECT
+    lemma,
+    SUM(CASE WHEN definiteness = 'barePl' THEN 1 ELSE 0 END) AS bare_pl,
+    SUM(CASE WHEN definiteness = 'bareSg' THEN 1 ELSE 0 END) AS bare_sg,
+    ROUND(
+        SUM(CASE WHEN definiteness = 'barePl' THEN 1 ELSE 0 END) * 1.0
+        /
+        NULLIF(
+            SUM(CASE WHEN definiteness IN ('barePl', 'bareSg') THEN 1 ELSE 0 END),
+            0
+        ),
+        4
+    ) AS flex_bareN_index
+FROM nouns
+WHERE definiteness IN ('barePl', 'bareSg')
+GROUP BY lemma
+HAVING COUNT(*) >= 5
+ORDER BY flex_bareN_index DESC;
+
+
+
+-- Flexibility index based on countability annotation
+-- flex_index = count / (count + mass)
+-- 1.0 = strongly count N; 0.5 = strongly flex N; 0.0 = strongly masss N
+-- saved as flex_assignedNP_index.csv
+
+SELECT
+    lemma,
+    SUM(CASE WHEN countability = 'count' THEN 1 ELSE 0 END) AS ct_tokens,
+    SUM(CASE WHEN countability = 'mass' THEN 1 ELSE 0 END) AS mass_tokens,
+    ROUND(
+        SUM(CASE WHEN countability = 'count' THEN 1 ELSE 0 END) * 1.0
+        /
+        NULLIF(
+            SUM(CASE WHEN countability IN ('count', 'mass') THEN 1 ELSE 0 END),
+            0
+        ),
+        4
+    ) AS flex_assgd_index
+FROM nouns
+WHERE countability IN ('count', 'mass')
+GROUP BY lemma
+HAVING COUNT(*) >= 5
+ORDER BY flex_assgd_index DESC;
+
+
+-- compound nouns
+-- saved as compound_NOUN_counts.csv
+
+SELECT
+    lemma,
+    COUNT(*) AS total_tokens,
+
+    -- compound vs non-compound
+    SUM(CASE WHEN number LIKE 'cpd_%' THEN 1 ELSE 0 END) AS compound_tokens,
+    SUM(CASE WHEN number NOT LIKE 'cpd_%' THEN 1 ELSE 0 END) AS non_compound_tokens,
+
+    -- compound breakdown
+    SUM(CASE WHEN number = 'cpd_nonhead' THEN 1 ELSE 0 END) AS nonhead_tokens,
+    SUM(CASE WHEN number IN ('cpd_head_sg','cpd_head_pl','cpd_proper')
+        THEN 1 ELSE 0 END) AS head_tokens,
+
+    -- ratios
+    ROUND(
+        SUM(CASE WHEN number LIKE 'cpd_%' THEN 1 ELSE 0 END) * 1.0
+        / NULLIF(COUNT(*),0),
+        4
+    ) AS compound_ratio,
+
+    ROUND(
+        SUM(CASE WHEN number IN ('cpd_head_sg','cpd_head_pl','cpd_proper')
+            THEN 1 ELSE 0 END) * 1.0
+        /
+        NULLIF(
+            SUM(CASE WHEN number LIKE 'cpd_%' THEN 1 ELSE 0 END),
+            0
+        ),
+        4
+    ) AS head_ratio_within_compounds
+
+FROM nouns
+WHERE number NOT LIKE 'proper%'
+GROUP BY lemma
+HAVING COUNT(*) >= 10
+ORDER BY compound_ratio DESC;
+
+
+-- ixnay
+-- Basic Compound Frequency / Productivity Index (CPI)
+-- CPI= total noun tokens / compound tokens
+​-- Interpretation:
+-- 0.0 = never compounded; 1.0 = always compounded; 0.5 = half the time in compounds
+-- saved as compound_freq_index.csv
+-- ixnay
+
+SELECT
+    lemma,
+    COUNT(*) AS total_tokens,
+
+    SUM(CASE WHEN number LIKE 'cpd_%'
+        THEN 1 ELSE 0 END) AS compound_tokens,
+
+    ROUND(
+        SUM(CASE WHEN number LIKE 'cpd_%' THEN 1 ELSE 0 END) * 1.0
+        / NULLIF(COUNT(*),0),
+        4
+    ) AS compound_productivity_index
+
+FROM nouns
+GROUP BY lemma
+HAVING COUNT(*) >= 20
+ORDER BY compound_productivity_index DESC;
+
+
+-- ixnay
+-- Head Productivity vs Modifier Productivity
+-- Modifier Index = nonhead tokens / total tokens
+-- head index = head tokens / total tokent
+-- saved as cpd_modifier_head_index.csv
+-- ixnay
+
+SELECT
+    lemma,
+    COUNT(*) AS total_tokens,
+
+    SUM(CASE WHEN number = 'cpd_nonhead'
+        THEN 1 ELSE 0 END) AS modifier_tokens,
+
+    SUM(CASE WHEN number IN ('cpd_head_sg','cpd_head_pl','cpd_proper')
+        THEN 1 ELSE 0 END) AS head_tokens,
+
+    ROUND(
+        SUM(CASE WHEN number = 'cpd_nonhead'
+            THEN 1 ELSE 0 END) * 1.0
+        / NULLIF(COUNT(*),0),
+        4
+    ) AS modifier_index,
+
+    ROUND(
+        SUM(CASE WHEN number IN ('cpd_head_sg','cpd_head_pl','cpd_proper')
+            THEN 1 ELSE 0 END) * 1.0
+        / NULLIF(COUNT(*),0),
+        4
+    ) AS head_index
+
+FROM nouns
+GROUP BY lemma
+HAVING COUNT(*) >= 20
+ORDER BY modifier_index DESC;
+
+
+
+-- ====================================================================================
+
+
+-- IMPORT NEWLY CREATED INDICES AS NEW TABLES
+
+
+-- noun count index via assigned categories in definiteness
+
+Drop table ct_mass_assigned;
+
+CREATE TABLE ct_mass_assigned (
+lemma VARCHAR(255) PRIMARY KEY,
+massct_tk INT,
+ct_tk INT,
+mass_tk INT,
+ct_proportion FLOAT
+);
+
+LOAD DATA LOCAL INFILE '/d/Seafile/sfdox/2025np/output/prop_massct_countability_assigned.csv'
+INTO TABLE ct_mass_assigned
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+IGNORE 1 LINES;
+
+commit;
+
+select * from ct_mass_assigned;
+
+-- count noun index based on bare pl / sg ratio
+
+drop table bare_ct;
+
+CREATE TABLE bare_ct (
+lemma VARCHAR(255) PRIMARY KEY,
+bare_bpl_tk INT,
+bare_bsg_tk INT,
+total_tk_bare INT,
+pl_sg_ratio FLOAT,
+pl_sg_prop FLOAT
+);
+
+LOAD DATA LOCAL INFILE '/d/Seafile/sfdox/2025np/output/prop_definiteness_barePl_Sg.csv'
+INTO TABLE bare_ct
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+IGNORE 1 LINES;
+
+select * from bare_ct;
+
+-- flex index from bare nouns
+
+CREATE TABLE flex_bare  (
+lemma VARCHAR(255) PRIMARY KEY,
+bare_pl	INT,
+bare_sg	INT,
+total_bflexind_tk INT,
+flex_bareN_index FLOAT
+);
+
+LOAD DATA LOCAL INFILE '/d/Seafile/sfdox/2025np/output/flex_bareNP_index.csv'
+into table flex_bare
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+IGNORE 1 LINES;
+
+select * from flex_bare;
+
+-- flex index from script classification
+
+CREATE TABLE flex_massct (
+lemma VARCHAR(255) PRIMARY KEY,
+ct_tokens INT,
+mass_flexind_asg_tk	INT,
+total_flexind_asg_tk INT,
+flex_assgd_index FLOAT
+);
+
+LOAD DATA LOCAL INFILE '/d/Seafile/sfdox/2025np/output/flex_assignedN_index.csv'
+into table flex_massct
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+IGNORE 1 LINES;
+
+select * from flex_massct;
+
+-- compound frequency index
+
+CREATE TABLE cpdfreq (
+ lemma VARCHAR(255) PRIMARY KEY,
+ total_tk_cpd_ncpd INT,
+ cpd_tk INT,
+ ncpd_tk INT,
+ cpd_freq_index FLOAT
+);
+
+LOAD DATA LOCAL INFILE '/d/Seafile/sfdox/2025np/output/compound_freq_index.csv'
+INTO TABLE cpdfreq
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+IGNORE 1 LINES;
+
+select * from cpdfreq;
+
+
+-- --------------------------------------------------------
+
+-- Now for data output to feed into R
+
+-- Left join noun data, starting with lexical concreteness ratings, for correlations
+
+COMMIT;
+
+SELECT c.lemma, c.bigram, c.conc_mean, c.conc_sd, c.lexfreq,
+   bc.bare_bpl_tk, bc.bare_bsg_tk, bc.total_tk_bare, bc.pl_sg_prop,
+   d.massct_tk, d.ct_tk, d.mass_tk, d.ct_proportion,
+   fb.flex_bareN_index,
+   fmc.flex_assgd_index
+FROM concreteness c
+LEFT JOIN bare_ct bc
+ON c.lemma = bc.lemma
+LEFT JOIN ct_mass_assigned d
+ON c.lemma = d.lemma
+LEFT JOIN flex_bare fb
+ON c.lemma = fb.lemma
+LEFT JOIN flex_massct fmc
+ON c.lemma = fmc.lemma
+;
+
+
+-- Left join compound noun data, starting with lexical concreteness ratings, for correlations
+
+SELECT c.lemma, c.bigram, c.conc_mean, c.conc_sd, c.lexfreq,
+   b.bare_bpl_tk, b.bare_bsg_tk, b.total_tk_bare, b.pl_sg_prop,
+   d.massct_tk, d.ct_tk, d.ct_proportion,
+   cpd.cpd_tk, cpd.ncpd_tk, cpd.cpd_freq_index
+FROM concreteness c
+LEFT JOIN bare_ct b
+ON c.lemma = b.lemma
+LEFT JOIN ct_mass_assigned d
+ON c.lemma = d.lemma
+LEFT JOIN cpdfreq cpd
+ON c.lemma = cpd.lemma
+;
+
+
