@@ -1,0 +1,349 @@
+create database nounEnt; 
+
+use 'nounEnt'; 
+
+CREATE TABLE sentences (
+ cum_sent_id BIGINT PRIMARY KEY,
+ sent_id INT,
+ text_id VARCHAR(255),
+ genre VARCHAR(100),
+ year INT,
+ pgraph_num INT,
+ sent_num INT
+);
+ 
+use 'nounEnt'; 
+
+CREATE TABLE nouns (
+token_id BIGINT PRIMARY KEY,
+token VARCHAR(200),
+lemma VARCHAR(200),
+number  VARCHAR(20),
+definiteness  VARCHAR(20),
+countability  VARCHAR(20) 
+);
+
+
+; 
+CREATE TABLE tokens (
+  token_id BIGINT PRIMARY KEY,  -- ten-digit token ID
+  sent_id INT,
+  cum_sent_id BIGINT,
+  token_postn INT,  -- token position
+  token VARCHAR(200),
+  lemma VARCHAR(200),  
+  pos VARCHAR(20)		-- part of speech tag
+);
+
+
+
+-- Table for concreteness ratings
+CREATE TABLE concreteness (
+  lemma VARCHAR(200) PRIMARY KEY,
+  bigram INT,
+  conc_mean FLOAT,
+  conc_sd FLOAT,
+  lexfreq FLOAT       -- or DOUBLE, DECIMAL, depending on your data
+);
+
+
+ 
+SHOW TABLES; 
+
+LOAD DATA LOCAL INFILE '/d/dox/Seafile/rdata/2025np/sentences.csv'
+INTO TABLE sentences
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\r\n'
+IGNORE 1 LINES;
+
+-- ? 
+LOAD DATA LOCAL INFILE '/d/dox/Seafile/rdata/2025np/nouns.csv'
+INTO TABLE nouns
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\r\n'
+IGNORE 1 LINES;
+
+LOAD DATA LOCAL INFILE '/d/dox/Seafile/rdata/2025np/concreteness.csv'
+INTO TABLE concreteness
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+IGNORE 1 LINES;
+
+
+LOAD DATA LOCAL INFILE '/d/dox/Seafile/rdata/2025np/tokens.csv'
+INTO TABLE tokens
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\r\n'
+IGNORE 1 LINES;
+
+-- ------------
+-- ------------
+
+-- Check the database before sampling; first, check table sizes 
+
+SELECT 'nouns' AS table_name, COUNT(*) AS records
+FROM nouns
+UNION ALL
+SELECT 'tokens', COUNT(*)
+FROM tokens
+UNION ALL
+SELECT 'sentences', COUNT(*)
+FROM sentences;
+
+
+-- Check whether every noun record has a matching token record 
+
+SELECT
+    COUNT(*) AS noun_records,
+    COUNT(t.token_id) AS matched_token_records
+FROM nouns AS n
+LEFT JOIN tokens AS t
+    ON n.token_id = t.token_id;
+
+
+-- Check whether the tokens have matching sentence records 
+
+SELECT
+    COUNT(*) AS matched_tokens,
+    COUNT(s.cum_sent_id) AS matched_sentences
+FROM nouns AS n
+JOIN tokens AS t
+    ON n.token_id = t.token_id
+LEFT JOIN sentences AS s
+    ON t.cum_sent_id = s.cum_sent_id;
+    
+    
+-- Inspect the actual classification labels   
+    
+SELECT
+    countability,
+    COUNT(*) AS records
+FROM nouns
+GROUP BY countability
+ORDER BY records DESC;    
+    
+    
+------------------
+
+-- Create a reproducible sample of 400 noun tokens.
+
+SET GLOBAL innodb_buffer_pool_size = 1073741824; -- 1 GB in bytes
+
+CREATE TABLE validation_sample AS
+SELECT
+    n.token_id
+FROM nouns AS n
+JOIN tokens AS t
+    ON n.token_id = t.token_id
+JOIN sentences AS s
+    ON t.cum_sent_id = s.cum_sent_id
+ORDER BY RAND()
+LIMIT 400;
+
+
+-- Verify the sample.
+
+SELECT COUNT(*) AS sample_size
+FROM validation_sample;
+
+-- You should get: sample_size  = 400
+-- Then check for duplicate token IDs:
+
+SELECT
+    token_id,
+    COUNT(*) AS records
+FROM validation_sample
+GROUP BY token_id
+HAVING COUNT(*) > 1;
+
+-- This should return no rows.
+
+-- Finally, save the sample IDs somewhere safe. The persistent table will preserve them in the database, but exporting them is also useful for documentation and reproducibility.
+
+SELECT token_id
+FROM validation_sample
+ORDER BY token_id;
+
+
+-- For validation annotation 
+
+SELECT
+    n.token_id,
+    n.token AS noun_token,
+    n.lemma,
+    t.pos AS original_pos,
+    t.token_postn,
+    t.sent_id,
+    t.cum_sent_id,
+    s.text_id,
+    s.genre,
+    s.year,
+    s.pgraph_num,
+    s.sent_num,
+    st.sentence
+
+FROM validation_sample AS vs
+
+JOIN nouns AS n
+    ON vs.token_id = n.token_id
+
+JOIN tokens AS t
+    ON n.token_id = t.token_id
+
+JOIN sentences AS s
+    ON t.cum_sent_id = s.cum_sent_id
+
+LEFT JOIN (
+    SELECT
+        cum_sent_id,
+        GROUP_CONCAT(
+            token
+            ORDER BY token_postn
+            SEPARATOR ' '
+        ) AS sentence
+    FROM tokens
+    GROUP BY cum_sent_id
+) AS st
+    ON t.cum_sent_id = st.cum_sent_id
+
+ORDER BY n.token_id;
+
+
+
+----------------
+
+-- Validation key - how the script classified nouns 
+ 
+
+
+SELECT
+    n.token_id,
+    n.countability AS script_countability,
+    n.number AS script_number,
+    n.definiteness AS script_definiteness
+
+FROM validation_sample AS vs
+
+JOIN nouns AS n
+    ON vs.token_id = n.token_id
+
+ORDER BY n.token_id;
+
+
+
+
+
+=====================================================
+
+
+R statistics 
+
+
+Confusion matrix 
+
+library(tidyverse) 
+library(psych)
+library(ggplot2)
+
+validn <- read.csv("/d/dox/Seafile/rdata/2025np/validation/valid_check.csv", na.strings=".")
+
+vars <- validn[, c("token_id", 
+    "noun_token", 
+    "lemma", 
+    "original_pos", 
+    "ct_manual", 
+    "num_manual", 
+    "def1_manual", 
+    "def_manual",
+    "note",
+    "ct_script",
+    "num_script", 
+    "def_script")]
+
+
+# Define the two primary classes.
+valid_labels <- c("ct", "nct")
+
+# Identify tokens that can be compared directly.
+eligible <- !is.na(validation$ct_manual) &
+            !is.na(validation$ct_script) &
+            validation$ct_manual %in% valid_labels &
+            validation$ct_script %in% valid_labels
+
+v <- validation[eligible, ]
+
+# Confusion matrix: manual annotations in rows,
+# automated classifications in columns.
+cm <- table(
+  Manual = factor(v$ct_manual,
+                  levels = valid_labels),
+  Script = factor(v$ct_script,
+                  levels = valid_labels)
+)
+
+print(cm)
+
+# Overall agreement.
+agreement <- mean(
+  v$ct_manual == v$ct_script
+)
+
+cat("Evaluable tokens:", nrow(v), "\n")
+cat("Overall agreement:", round(agreement, 4), "\n")
+cat("Overall agreement (%):",
+    round(100 * agreement, 2), "\n")
+
+ 
+
+
+
+-------------------
+
+Calculate Cohen's kappa
+
+
+
+
+# Cohen's kappa for the binary countability labels.
+kappa_result <- kappa2(
+  data.frame(
+    Manual = factor(v$ct_manual,
+                    levels = valid_labels),
+    Script = factor(v$ct_script,
+                    levels = valid_labels)
+  ),
+  weight = "unweighted"
+)
+
+print(kappa_result)
+
+
+
+------- Results
+
+-- Confusion matrix 
+
+ Manual  count nct
+  count    94   7
+  nct       7  44  
+ 
+Overall agreement (%): 90.79 
+
+
+  Raters = 2 
+    Kappa = 0.793 
+
+        z = 9.78 
+  p-value = 0 
+
+
+
+
+
+
+
+
+
+
+
+
