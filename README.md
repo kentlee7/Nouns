@@ -40,7 +40,7 @@ Compound nouns were also briefly counted, to determine how often each noun lemma
 ## Citing this research 
 To use the data for your research, you can cite my research paper in order to cite the data, or the indices in these data files. The paper is under review at an applied linguistics journal published in Korea (where I currently work). 
 
-- Lee, Kent. (2026). English count nouns: Variation and statistical tendencies. (under review)
+- Lee, Kent A. Lee. (2026). Modern English Education 27(0) 463-475. DOI:10.18095/meeso.2026.27.1.463
 
 
 ## Data samples 
@@ -63,8 +63,9 @@ This respository contains the following files.
 - Python script used to extract data from COCA: ```import.coca.py```
 - SQL syntax for handling output of Python script to create files for statistical analyis: ```sql.syntax.txt```
 - R syntax for data analysis for my research paper: ```R_syntax.txt```
-- Pretty graphs from my R analysis: ```R_graphs_output.pdf``` 
-- Published paper on this project: forthcoming
+- Pretty graphs from my R analysis: ```R_graphs_output.pdf```
+- SQL and R code for the validation component of the study: ```validation.syntax.txt'''
+- Published paper on this project: ```kl.meeso.nouns.2026.pdf```
 
 
 
